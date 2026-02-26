@@ -33,42 +33,7 @@ struct HealthGPTView: View {
     var body: some View {
         NavigationStack {
             if let llm = self.healthDataInterpreter.llm {
-                let contextBinding = Binding { llm.context.chat } set: { llm.context.chat = $0 }
-                
-                ChatView(contextBinding, exportFormat: .text)
-                    .speak(llm.context.chat, muted: !self.textToSpeech)
-                    .speechToolbarButton(muted: !self.$textToSpeech)
-                    .viewStateAlert(state: llm.state)
-                    .overlay(alignment: .center) {
-                        if llm.state == .callingTools {
-                            callingToolsIndicator
-                        }
-                    }
-                    .navigationTitle("WELCOME_TITLE")
-                    .toolbar {
-                        ToolbarItem(placement: .primaryAction) {
-                            self.settingsButton
-                        }
-                        ToolbarItem(placement: .primaryAction) {
-                            self.resetChatButton
-                        }
-                    }
-                    .onChange(of: llm.context, initial: true) { _, _ in
-                        // Once the user enters a message in the chat, increase `messageTaskId` that triggers LLM inference
-                        if !llm.context.isEmpty && llm.state != .generating && llm.context.last?.role != .system {
-                            self.messageTaskId += 1
-                        }
-                    }
-                    // Triggered on every new user message in the chat via `messageTaskId`
-                    // Automatically cancels the LLM inference once view disappears
-                    .task(id: self.messageTaskId) {
-                        do {
-                            try await healthDataInterpreter.queryLLM()
-                        } catch {
-                            showErrorAlert = true
-                            errorMessage = "Error querying LLM: \(error.localizedDescription)"
-                        }
-                    }
+                chatContentView(for: llm)
             } else {
                 self.loadingChatView
             }
@@ -150,5 +115,42 @@ struct HealthGPTView: View {
             Text("LOADING_CHAT_VIEW")
             ProgressView()
         }
+    }
+
+    @ViewBuilder
+    private func chatContentView(for llm: any LLMSession) -> some View {
+        let contextBinding = Binding { llm.context.chat } set: { llm.context.chat = $0 }
+
+        ChatView(contextBinding, exportFormat: .text)
+            .speak(llm.context.chat, muted: !self.textToSpeech)
+            .speechToolbarButton(muted: !self.$textToSpeech)
+            .viewStateAlert(state: llm.state)
+            .overlay(alignment: .center) {
+                if llm.state == .callingTools {
+                    callingToolsIndicator
+                }
+            }
+            .navigationTitle("WELCOME_TITLE")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    self.settingsButton
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    self.resetChatButton
+                }
+            }
+            .onChange(of: llm.context, initial: true) { _, _ in
+                if !llm.context.isEmpty && llm.state != .generating && llm.context.last?.role != .system {
+                    self.messageTaskId += 1
+                }
+            }
+            .task(id: self.messageTaskId) {
+                do {
+                    try await healthDataInterpreter.queryLLM()
+                } catch {
+                    showErrorAlert = true
+                    errorMessage = "Error querying LLM: \(error.localizedDescription)"
+                }
+            }
     }
 }

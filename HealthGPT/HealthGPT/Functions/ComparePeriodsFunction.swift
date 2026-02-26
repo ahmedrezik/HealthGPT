@@ -11,10 +11,6 @@ import SpeziLLMOpenAI
 
 
 struct ComparePeriodsFunction: LLMFunction {
-    static let name: String = "compare_periods"
-    // swiftlint:disable:next line_length
-    static let description: String = "Compare a health metric between two time periods. Specify each period as days ago from today. For example, period1Start=7, period1End=0 means the last 7 days; period2Start=14, period2End=7 means the 7 days before that."
-
     enum MetricType: String, LLMFunctionParameterEnum {
         case steps
         case activeEnergy
@@ -24,28 +20,36 @@ struct ComparePeriodsFunction: LLMFunction {
         case sleep
     }
 
+    static let name: String = "compare_periods"
+    // swiftlint:disable:next line_length
+    static let description: String = "Compare a health metric between two time periods. Specify each period as days ago from today. For example, period1Start=7, period1End=0 means the last 7 days; period2Start=14, period2End=7 means the 7 days before that."
+
     @Parameter(description: "The health metric to compare") var metric: MetricType
 
-    // swiftlint:disable:next line_length
-    @Parameter(description: "Start of period 1 in days ago (e.g. 7 means 7 days ago)") var period1Start: Int
+    @Parameter(description: "Start of period 1 in days ago (e.g. 7 means 7 days ago)") var period1Start: String
 
-    @Parameter(description: "End of period 1 in days ago (e.g. 0 means today)") var period1End: Int
+    @Parameter(description: "End of period 1 in days ago (e.g. 0 means today)") var period1End: String
 
-    @Parameter(description: "Start of period 2 in days ago") var period2Start: Int
+    @Parameter(description: "Start of period 2 in days ago") var period2Start: String
 
-    @Parameter(description: "End of period 2 in days ago") var period2End: Int
+    @Parameter(description: "End of period 2 in days ago") var period2End: String
 
-    let healthDataFetcher: HealthDataFetcher
+    nonisolated(unsafe) let healthDataFetcher: HealthDataFetcher
 
     func execute() async throws -> String? {
         let now = Date()
         let calendar = Calendar.current
         let healthMetric = HealthMetric(rawValue: metric.rawValue) ?? .steps
 
-        guard let p1Start = calendar.date(byAdding: .day, value: -max(period1Start, period1End), to: now),
-              let p1End = calendar.date(byAdding: .day, value: -min(period1Start, period1End), to: now),
-              let p2Start = calendar.date(byAdding: .day, value: -max(period2Start, period2End), to: now),
-              let p2End = calendar.date(byAdding: .day, value: -min(period2Start, period2End), to: now) else {
+        let p1s = Int(period1Start) ?? 7
+        let p1e = Int(period1End) ?? 0
+        let p2s = Int(period2Start) ?? 14
+        let p2e = Int(period2End) ?? 7
+
+        guard let p1Start = calendar.date(byAdding: .day, value: -max(p1s, p1e), to: now),
+              let p1End = calendar.date(byAdding: .day, value: -min(p1s, p1e), to: now),
+              let p2Start = calendar.date(byAdding: .day, value: -max(p2s, p2e), to: now),
+              let p2End = calendar.date(byAdding: .day, value: -min(p2s, p2e), to: now) else {
             return "Error: Could not calculate date ranges."
         }
 

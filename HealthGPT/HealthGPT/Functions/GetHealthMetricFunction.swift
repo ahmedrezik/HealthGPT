@@ -11,10 +11,6 @@ import SpeziLLMOpenAI
 
 
 struct GetHealthMetricFunction: LLMFunction {
-    static let name: String = "get_health_metric"
-    // swiftlint:disable:next line_length
-    static let description: String = "Fetch daily values for a specific health metric over a given number of past days. Use this to retrieve step counts, active energy, exercise minutes, body weight, resting heart rate, or sleep data."
-
     enum MetricType: String, LLMFunctionParameterEnum {
         case steps
         case activeEnergy
@@ -24,14 +20,18 @@ struct GetHealthMetricFunction: LLMFunction {
         case sleep
     }
 
+    static let name: String = "get_health_metric"
+    // swiftlint:disable:next line_length
+    static let description: String = "Fetch daily values for a specific health metric over a given number of past days. Use this to retrieve step counts, active energy, exercise minutes, body weight, resting heart rate, or sleep data."
+
     @Parameter(description: "The health metric to fetch") var metric: MetricType
 
-    @Parameter(description: "Number of past days to fetch (1-90)") var days: Int
+    @Parameter(description: "Number of past days to fetch (1-90)") var days: String
 
-    let healthDataFetcher: HealthDataFetcher
+    nonisolated(unsafe) let healthDataFetcher: HealthDataFetcher
 
     func execute() async throws -> String? {
-        let clampedDays = max(1, min(days, 90))
+        let clampedDays = max(1, min(Int(days) ?? 7, 90))
         let endDate = Date()
         guard let startDate = Calendar.current.date(byAdding: .day, value: -clampedDays, to: endDate) else {
             return "Error: Could not calculate date range."
