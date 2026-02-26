@@ -8,12 +8,13 @@
 
 import HealthKit
 import Spezi
+import SpeziHealthKit
 
 
 @Observable
 class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
-    @ObservationIgnored private let healthStore = HKHealthStore()
-    
+    @ObservationIgnored @Dependency(HealthKit.self) private var healthKit
+
     required init() { }
     
 
@@ -30,37 +31,33 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
         unit: HKUnit,
         options: HKStatisticsOptions
     ) async throws -> [Double] {
-        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
-            throw HealthDataFetcherError.invalidObjectType
+        let sampleType = SampleType<HKQuantitySample>.quantity(identifier, displayUnit: unit)
+
+        let statistics: [HKStatistics]
+        if options.contains(.cumulativeSum) {
+            statistics = try await healthKit.statisticsQuery(sampleType, aggregatedBy: [.sum], over: .day, timeRange: .last(days: 14))
+        } else {
+            statistics = try await healthKit.statisticsQuery(sampleType, aggregatedBy: [.average], over: .day, timeRange: .last(days: 14))
         }
 
-        let predicate = createLastTwoWeeksPredicate()
-
-        let quantityLastTwoWeeks = HKSamplePredicate.quantitySample(
-            type: quantityType,
-            predicate: predicate
-        )
-
-        let query = HKStatisticsCollectionQueryDescriptor(
-            predicate: quantityLastTwoWeeks,
-            options: options,
-            anchorDate: Date.startOfDay(),
-            intervalComponents: DateComponents(day: 1)
-        )
-
-        let quantityCounts = try await query.result(for: healthStore)
-
-        var dailyData = [Double]()
-
-        quantityCounts.enumerateStatistics(
-            from: Date().twoWeeksAgoStartOfDay(),
-            to: Date.startOfDay()
-        ) { statistics, _ in
-            if let quantity = statistics.sumQuantity() {
-                dailyData.append(quantity.doubleValue(for: unit))
+        let calendar = Calendar.current
+        var lookup: [Date: Double] = [:]
+        for stat in statistics {
+            let day = calendar.startOfDay(for: stat.startDate)
+            if options.contains(.cumulativeSum) {
+                lookup[day] = stat.sumQuantity()?.doubleValue(for: unit) ?? 0
             } else {
-                dailyData.append(0)
+                lookup[day] = stat.averageQuantity()?.doubleValue(for: unit) ?? 0
             }
+        }
+
+        var dailyData: [Double] = []
+        for dayOffset in -14..<0 {
+            guard let date = calendar.date(byAdding: .day, value: dayOffset, to: calendar.startOfDay(for: Date())) else {
+                dailyData.append(0)
+                continue
+            }
+            dailyData.append(lookup[date] ?? 0)
         }
 
         return dailyData
@@ -132,7 +129,7 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
     /// - Throws: `HealthDataFetcherError` if the data cannot be fetched.
     func fetchLastTwoWeeksSleep() async throws -> [Double] {
         var dailySleepData: [Double] = []
-        
+
         // We go through all possible days in the last two weeks.
         for day in -14..<0 {
             // We start the calculation at 3 PM the previous day to 3 PM on the day in question.
@@ -143,30 +140,25 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
                 dailySleepData.append(0)
                 continue
             }
-            
-            
-            let sleepType = HKCategoryType(.sleepAnalysis)
 
-            let dateRangePredicate = HKQuery.predicateForSamples(withStart: startOfSleep, end: endOfSleep, options: .strictEndDate)
-            let allAsleepValuesPredicate = HKCategoryValueSleepAnalysis.predicateForSamples(equalTo: HKCategoryValueSleepAnalysis.allAsleepValues)
-            let compoundPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [dateRangePredicate, allAsleepValuesPredicate])
-
-            let descriptor = HKSampleQueryDescriptor(
-                predicates: [.categorySample(type: sleepType, predicate: compoundPredicate)],
-                sortDescriptors: []
+            let asleepPredicate = HKCategoryValueSleepAnalysis.predicateForSamples(
+                equalTo: HKCategoryValueSleepAnalysis.allAsleepValues
             )
-            
-            let results = try await descriptor.result(for: healthStore)
+            let results = try await healthKit.query(
+                .sleepAnalysis,
+                timeRange: HealthKitQueryTimeRange(startOfSleep..<endOfSleep),
+                predicate: asleepPredicate
+            )
 
             var secondsAsleep = 0.0
             for result in results {
                 secondsAsleep += result.endDate.timeIntervalSince(result.startDate)
             }
-            
+
             // Append the hours of sleep for that date
             dailySleepData.append(secondsAsleep / (60 * 60))
         }
-        
+
         return dailySleepData
     }
 
@@ -188,42 +180,25 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
         from startDate: Date,
         to endDate: Date
     ) async throws -> [(date: Date, value: Double)] {
-        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
-            throw HealthDataFetcherError.invalidObjectType
+        let sampleType = SampleType<HKQuantitySample>.quantity(identifier, displayUnit: unit)
+        let timeRange = HealthKitQueryTimeRange(startDate..<endDate)
+
+        let statistics: [HKStatistics]
+        if options.contains(.cumulativeSum) {
+            statistics = try await healthKit.statisticsQuery(sampleType, aggregatedBy: [.sum], over: .day, timeRange: timeRange)
+        } else {
+            statistics = try await healthKit.statisticsQuery(sampleType, aggregatedBy: [.average], over: .day, timeRange: timeRange)
         }
 
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
-
-        let quantitySamples = HKSamplePredicate.quantitySample(
-            type: quantityType,
-            predicate: predicate
-        )
-
-        let query = HKStatisticsCollectionQueryDescriptor(
-            predicate: quantitySamples,
-            options: options,
-            anchorDate: Calendar.current.startOfDay(for: startDate),
-            intervalComponents: DateComponents(day: 1)
-        )
-
-        let results = try await query.result(for: healthStore)
-
-        var dailyData: [(date: Date, value: Double)] = []
-
-        let enumerateStart = Calendar.current.startOfDay(for: startDate)
-        let enumerateEnd = Calendar.current.startOfDay(for: endDate)
-
-        results.enumerateStatistics(from: enumerateStart, to: enumerateEnd) { statistics, _ in
+        return statistics.map { stat in
             let value: Double
             if options.contains(.cumulativeSum) {
-                value = statistics.sumQuantity()?.doubleValue(for: unit) ?? 0
+                value = stat.sumQuantity()?.doubleValue(for: unit) ?? 0
             } else {
-                value = statistics.averageQuantity()?.doubleValue(for: unit) ?? 0
+                value = stat.averageQuantity()?.doubleValue(for: unit) ?? 0
             }
-            dailyData.append((date: statistics.startDate, value: value))
+            return (date: stat.startDate, value: value)
         }
-
-        return dailyData
     }
 
     /// Fetches sleep data for an arbitrary date range using 3PM-3PM sleep windows.
@@ -249,20 +224,14 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
                 continue
             }
 
-            let sleepType = HKCategoryType(.sleepAnalysis)
-
-            let dateRangePredicate = HKQuery.predicateForSamples(withStart: startOfSleep, end: endOfSleep, options: .strictEndDate)
-            let allAsleepValuesPredicate = HKCategoryValueSleepAnalysis.predicateForSamples(
+            let asleepPredicate = HKCategoryValueSleepAnalysis.predicateForSamples(
                 equalTo: HKCategoryValueSleepAnalysis.allAsleepValues
             )
-            let compoundPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [dateRangePredicate, allAsleepValuesPredicate])
-
-            let descriptor = HKSampleQueryDescriptor(
-                predicates: [.categorySample(type: sleepType, predicate: compoundPredicate)],
-                sortDescriptors: []
+            let results = try await healthKit.query(
+                .sleepAnalysis,
+                timeRange: HealthKitQueryTimeRange(startOfSleep..<endOfSleep),
+                predicate: asleepPredicate
             )
-
-            let results = try await descriptor.result(for: healthStore)
 
             var secondsAsleep = 0.0
             for result in results {
@@ -274,13 +243,5 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
         }
 
         return dailySleepData
-    }
-
-    // MARK: - Private Helpers
-
-    private func createLastTwoWeeksPredicate() -> NSPredicate {
-        let now = Date()
-        let startDate = Calendar.current.date(byAdding: DateComponents(day: -14), to: now) ?? Date()
-        return HKQuery.predicateForSamples(withStart: startDate, end: now, options: .strictStartDate)
     }
 }

@@ -7,6 +7,7 @@
 //
 
 import HealthKit
+import SpeziHealthKit
 
 
 enum HealthMetric: String, CaseIterable, Sendable {
@@ -16,6 +17,17 @@ enum HealthMetric: String, CaseIterable, Sendable {
     case bodyWeight
     case restingHeartRate
     case sleep
+
+    var sampleType: SampleType<HKQuantitySample>? {
+        switch self {
+        case .steps: .stepCount
+        case .activeEnergy: .activeEnergyBurned
+        case .exerciseMinutes: .appleExerciseTime
+        case .bodyWeight: .bodyMass
+        case .restingHeartRate: .restingHeartRate
+        case .sleep: nil
+        }
+    }
 
     var identifier: HKQuantityTypeIdentifier? {
         switch self {
