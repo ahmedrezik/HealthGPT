@@ -12,6 +12,7 @@ import SpeziLLMOpenAI
 
 struct GetHealthMetricFunction: LLMFunction {
     static let name: String = "get_health_metric"
+    // swiftlint:disable:next line_length
     static let description: String = "Fetch daily values for a specific health metric over a given number of past days. Use this to retrieve step counts, active energy, exercise minutes, body weight, resting heart rate, or sleep data."
 
     enum MetricType: String, LLMFunctionParameterEnum {
@@ -23,11 +24,9 @@ struct GetHealthMetricFunction: LLMFunction {
         case sleep
     }
 
-    @Parameter(description: "The health metric to fetch")
-    var metric: MetricType
+    @Parameter(description: "The health metric to fetch") var metric: MetricType
 
-    @Parameter(description: "Number of past days to fetch (1-90)")
-    var days: Int
+    @Parameter(description: "Number of past days to fetch (1-90)") var days: Int
 
     let healthDataFetcher: HealthDataFetcher
 

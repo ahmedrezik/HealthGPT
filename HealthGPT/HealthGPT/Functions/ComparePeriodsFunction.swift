@@ -12,6 +12,7 @@ import SpeziLLMOpenAI
 
 struct ComparePeriodsFunction: LLMFunction {
     static let name: String = "compare_periods"
+    // swiftlint:disable:next line_length
     static let description: String = "Compare a health metric between two time periods. Specify each period as days ago from today. For example, period1Start=7, period1End=0 means the last 7 days; period2Start=14, period2End=7 means the 7 days before that."
 
     enum MetricType: String, LLMFunctionParameterEnum {
@@ -23,20 +24,16 @@ struct ComparePeriodsFunction: LLMFunction {
         case sleep
     }
 
-    @Parameter(description: "The health metric to compare")
-    var metric: MetricType
+    @Parameter(description: "The health metric to compare") var metric: MetricType
 
-    @Parameter(description: "Start of period 1 in days ago (e.g. 7 means 7 days ago)")
-    var period1Start: Int
+    // swiftlint:disable:next line_length
+    @Parameter(description: "Start of period 1 in days ago (e.g. 7 means 7 days ago)") var period1Start: Int
 
-    @Parameter(description: "End of period 1 in days ago (e.g. 0 means today)")
-    var period1End: Int
+    @Parameter(description: "End of period 1 in days ago (e.g. 0 means today)") var period1End: Int
 
-    @Parameter(description: "Start of period 2 in days ago")
-    var period2Start: Int
+    @Parameter(description: "Start of period 2 in days ago") var period2Start: Int
 
-    @Parameter(description: "End of period 2 in days ago")
-    var period2End: Int
+    @Parameter(description: "End of period 2 in days ago") var period2End: Int
 
     let healthDataFetcher: HealthDataFetcher
 
