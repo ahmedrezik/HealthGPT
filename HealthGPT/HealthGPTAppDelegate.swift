@@ -46,7 +46,7 @@ class HealthGPTAppDelegate: SpeziAppDelegate {
                         .appleExerciseTime,
                         .bodyMass,
                         .heartRate,
-                    .restingHeartRate,
+                        .restingHeartRate,
                         .stepCount
                     ]
             )
