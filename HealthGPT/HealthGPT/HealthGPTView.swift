@@ -23,6 +23,7 @@ struct HealthGPTView: View {
     @AppStorage(StorageKeys.fogModel) private var fogModel = LLMFogParameters.FogModelType.llama3_1_8B
 
     @Environment(HealthDataInterpreter.self) private var healthDataInterpreter
+    @Environment(HealthDataFetcher.self) private var healthDataFetcher
     @State private var showSettings = false
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
@@ -38,6 +39,11 @@ struct HealthGPTView: View {
                     .speak(llm.context.chat, muted: !self.textToSpeech)
                     .speechToolbarButton(muted: !self.$textToSpeech)
                     .viewStateAlert(state: llm.state)
+                    .overlay(alignment: .center) {
+                        if llm.state == .callingTools {
+                            callingToolsIndicator
+                        }
+                    }
                     .navigationTitle("WELCOME_TITLE")
                     .toolbar {
                         ToolbarItem(placement: .primaryAction) {
@@ -86,7 +92,12 @@ struct HealthGPTView: View {
                         with: LLMFogSchema(parameters: .init(modelType: self.fogModel))
                     )
                 } else {
-                    try await healthDataInterpreter.prepareLLM(with: LLMOpenAISchema(parameters: .init(modelType: openAIModel)))
+                    let schema = LLMOpenAISchema(parameters: .init(modelType: openAIModel)) {
+                        GetHealthMetricFunction(healthDataFetcher: healthDataFetcher)
+                        GetAvailableMetricsFunction()
+                        ComparePeriodsFunction(healthDataFetcher: healthDataFetcher)
+                    }
+                    healthDataInterpreter.prepareLLMWithTools(with: schema)
                 }
             } catch {
                 self.showErrorAlert = true
@@ -123,6 +134,17 @@ struct HealthGPTView: View {
         .accessibilityIdentifier("resetChatButton")
     }
     
+    private var callingToolsIndicator: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+            Text("Fetching your health data...")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private var loadingChatView: some View {
         VStack {
             Text("LOADING_CHAT_VIEW")
