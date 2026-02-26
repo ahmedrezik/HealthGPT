@@ -170,6 +170,114 @@ class HealthDataFetcher: DefaultInitializable, Module, EnvironmentAccessible {
         return dailySleepData
     }
 
+    // MARK: - Flexible Date-Range Queries
+
+    /// Fetches quantity data for an arbitrary date range, returning daily values with dates.
+    ///
+    /// - Parameters:
+    ///   - identifier: The `HKQuantityTypeIdentifier` representing the type of health data to fetch.
+    ///   - unit: The `HKUnit` to use for the fetched health data values.
+    ///   - options: The `HKStatisticsOptions` to use when fetching the health data.
+    ///   - startDate: The start of the date range.
+    ///   - endDate: The end of the date range.
+    /// - Returns: An array of tuples containing the date and value for each day.
+    func fetchQuantityData(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        options: HKStatisticsOptions,
+        from startDate: Date,
+        to endDate: Date
+    ) async throws -> [(date: Date, value: Double)] {
+        guard let quantityType = HKObjectType.quantityType(forIdentifier: identifier) else {
+            throw HealthDataFetcherError.invalidObjectType
+        }
+
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+
+        let quantitySamples = HKSamplePredicate.quantitySample(
+            type: quantityType,
+            predicate: predicate
+        )
+
+        let query = HKStatisticsCollectionQueryDescriptor(
+            predicate: quantitySamples,
+            options: options,
+            anchorDate: Calendar.current.startOfDay(for: startDate),
+            intervalComponents: DateComponents(day: 1)
+        )
+
+        let results = try await query.result(for: healthStore)
+
+        var dailyData: [(date: Date, value: Double)] = []
+
+        let enumerateStart = Calendar.current.startOfDay(for: startDate)
+        let enumerateEnd = Calendar.current.startOfDay(for: endDate)
+
+        results.enumerateStatistics(from: enumerateStart, to: enumerateEnd) { statistics, _ in
+            let value: Double
+            if options.contains(.cumulativeSum) {
+                value = statistics.sumQuantity()?.doubleValue(for: unit) ?? 0
+            } else {
+                value = statistics.averageQuantity()?.doubleValue(for: unit) ?? 0
+            }
+            dailyData.append((date: statistics.startDate, value: value))
+        }
+
+        return dailyData
+    }
+
+    /// Fetches sleep data for an arbitrary date range using 3PM-3PM sleep windows.
+    ///
+    /// - Parameters:
+    ///   - startDate: The start of the date range.
+    ///   - endDate: The end of the date range.
+    /// - Returns: An array of tuples containing the date and sleep hours for each day.
+    func fetchSleepData(from startDate: Date, to endDate: Date) async throws -> [(date: Date, hours: Double)] {
+        var dailySleepData: [(date: Date, hours: Double)] = []
+
+        let calendar = Calendar.current
+        let startDay = calendar.startOfDay(for: startDate)
+        let endDay = calendar.startOfDay(for: endDate)
+
+        var currentDay = startDay
+        while currentDay <= endDay {
+            guard let previousDay = calendar.date(byAdding: .day, value: -1, to: currentDay),
+                  let startOfSleep = calendar.date(bySettingHour: 15, minute: 0, second: 0, of: previousDay),
+                  let endOfSleep = calendar.date(bySettingHour: 15, minute: 0, second: 0, of: currentDay) else {
+                dailySleepData.append((date: currentDay, hours: 0))
+                currentDay = calendar.date(byAdding: .day, value: 1, to: currentDay) ?? endDay
+                continue
+            }
+
+            let sleepType = HKCategoryType(.sleepAnalysis)
+
+            let dateRangePredicate = HKQuery.predicateForSamples(withStart: startOfSleep, end: endOfSleep, options: .strictEndDate)
+            let allAsleepValuesPredicate = HKCategoryValueSleepAnalysis.predicateForSamples(
+                equalTo: HKCategoryValueSleepAnalysis.allAsleepValues
+            )
+            let compoundPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [dateRangePredicate, allAsleepValuesPredicate])
+
+            let descriptor = HKSampleQueryDescriptor(
+                predicates: [.categorySample(type: sleepType, predicate: compoundPredicate)],
+                sortDescriptors: []
+            )
+
+            let results = try await descriptor.result(for: healthStore)
+
+            var secondsAsleep = 0.0
+            for result in results {
+                secondsAsleep += result.endDate.timeIntervalSince(result.startDate)
+            }
+
+            dailySleepData.append((date: currentDay, hours: secondsAsleep / (60 * 60)))
+            currentDay = calendar.date(byAdding: .day, value: 1, to: currentDay) ?? endDay
+        }
+
+        return dailySleepData
+    }
+
+    // MARK: - Private Helpers
+
     private func createLastTwoWeeksPredicate() -> NSPredicate {
         let now = Date()
         let startDate = Calendar.current.date(byAdding: DateComponents(day: -14), to: now) ?? Date()
